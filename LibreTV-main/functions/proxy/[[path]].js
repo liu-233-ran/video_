@@ -148,7 +148,7 @@ export async function onRequest(context) {
 
     async function fetchContentWithType(targetUrl) {
         let referer = request.headers.get('Referer') || new URL(targetUrl).origin;
-        if (targetUrl.includes('doubanio.com')) {
+        if (targetUrl.includes('douban')) {
             referer = 'https://movie.douban.com/';
         }
 

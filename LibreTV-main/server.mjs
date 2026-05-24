@@ -128,8 +128,8 @@ app.use('/proxy', async (req, res) => {
           'Accept': '*/*'
         };
 
-        // Douban 图片需要 movie.douban.com Referer，否则返回 418
-        if (targetUrl.includes('doubanio.com')) {
+        // Douban 所有域名需要 movie.douban.com Referer，否则返回 418
+        if (targetUrl.includes('douban')) {
           reqHeaders['Referer'] = 'https://movie.douban.com/';
         }
 
