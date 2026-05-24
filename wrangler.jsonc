@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "video1",
+  "compatibility_date": "2026-05-24",
+  "observability": {
+    "enabled": true
+  },
+  "assets": {
+    "directory": "LibreTV-main"
+  },
+  "compatibility_flags": [
+    "nodejs_compat"
+  ]
+}
