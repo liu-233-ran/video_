@@ -133,6 +133,19 @@ export async function onRequest(context) {
         }
     }
 
+    function isBinaryContent(contentType, url) {
+        if (contentType) {
+            if (MEDIA_CONTENT_TYPES.some(type => contentType.startsWith(type))) {
+                return true;
+            }
+            if (contentType.includes('application/octet-stream')) {
+                return true;
+            }
+        }
+        const lowerUrl = url.split('?')[0].toLowerCase();
+        return MEDIA_FILE_EXTENSIONS.some(ext => lowerUrl.endsWith(ext));
+    }
+
     async function fetchContentWithType(targetUrl) {
         let referer = request.headers.get('Referer') || new URL(targetUrl).origin;
         if (targetUrl.includes('doubanio.com')) {
@@ -156,10 +169,16 @@ export async function onRequest(context) {
                 throw new Error(`HTTP error ${response.status}: ${response.statusText}. URL: ${targetUrl}. Body: ${errorBody.substring(0, 150)}`);
             }
 
-            const content = await response.text();
             const contentType = response.headers.get('Content-Type') || '';
+
+            if (isBinaryContent(contentType, targetUrl)) {
+                logDebug(`二进制内容: ${targetUrl}, Content-Type: ${contentType}`);
+                return { body: response.body, contentType, responseHeaders: response.headers, isBinary: true };
+            }
+
+            const content = await response.text();
             logDebug(`请求成功: ${targetUrl}, Content-Type: ${contentType}, 长度: ${content.length}`);
-            return { content, contentType, responseHeaders: response.headers };
+            return { content, contentType, responseHeaders: response.headers, isBinary: false };
 
         } catch (error) {
             if (error.name === 'AbortError') {
@@ -275,7 +294,16 @@ export async function onRequest(context) {
 
         logDebug(`收到代理请求: ${targetUrl}`);
 
-        const { content, contentType, responseHeaders } = await fetchContentWithType(targetUrl);
+        const result = await fetchContentWithType(targetUrl);
+
+        if (result.isBinary) {
+            const binaryHeaders = new Headers(result.responseHeaders);
+            binaryHeaders.set('Cache-Control', `public, max-age=${CACHE_TTL}`);
+            binaryHeaders.set("Access-Control-Allow-Origin", "*");
+            return new Response(result.body, { status: 200, headers: binaryHeaders });
+        }
+
+        const { content, contentType, responseHeaders } = result;
 
         if (isM3u8Content(content, contentType)) {
             const isMaster = content.includes('#EXT-X-STREAM-INF') || content.includes('#EXT-X-MEDIA:');
