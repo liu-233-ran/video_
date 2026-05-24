@@ -26,32 +26,32 @@ async function handleApiRequest(url) {
             
             // 添加超时处理
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 10000);
-            
+            const timeoutId = setTimeout(() => controller.abort(), 8000);
+
             try {
                 // 添加鉴权参数到代理URL
-                const proxiedUrl = await window.ProxyAuth?.addAuthToProxyUrl ? 
+                const proxiedUrl = await window.ProxyAuth?.addAuthToProxyUrl ?
                     await window.ProxyAuth.addAuthToProxyUrl(PROXY_URL + encodeURIComponent(apiUrl)) :
                     PROXY_URL + encodeURIComponent(apiUrl);
-                    
+
                 const response = await fetch(proxiedUrl, {
                     headers: API_CONFIG.search.headers,
                     signal: controller.signal
                 });
-                
+
                 clearTimeout(timeoutId);
-                
+
                 if (!response.ok) {
                     throw new Error(`API请求失败: ${response.status}`);
                 }
-                
+
                 const data = await response.json();
-                
+
                 // 检查JSON格式的有效性
                 if (!data || !Array.isArray(data.list)) {
                     throw new Error('API返回的数据格式无效');
                 }
-                
+
                 // 添加源信息到每个结果
                 data.list.forEach(item => {
                     item.source_name = source === 'custom' ? '自定义源' : API_SITES[source].name;
@@ -61,7 +61,7 @@ async function handleApiRequest(url) {
                         item.api_url = customApi;
                     }
                 });
-                
+
                 return JSON.stringify({
                     code: 200,
                     list: data.list || [],
@@ -115,25 +115,25 @@ async function handleApiRequest(url) {
             
             // 添加超时处理
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 10000);
-            
+            const timeoutId = setTimeout(() => controller.abort(), 8000);
+
             try {
                 // 添加鉴权参数到代理URL
-                const proxiedUrl = await window.ProxyAuth?.addAuthToProxyUrl ? 
+                const proxiedUrl = await window.ProxyAuth?.addAuthToProxyUrl ?
                     await window.ProxyAuth.addAuthToProxyUrl(PROXY_URL + encodeURIComponent(detailUrl)) :
                     PROXY_URL + encodeURIComponent(detailUrl);
-                    
+
                 const response = await fetch(proxiedUrl, {
                     headers: API_CONFIG.detail.headers,
                     signal: controller.signal
                 });
-                
+
                 clearTimeout(timeoutId);
-                
+
                 if (!response.ok) {
                     throw new Error(`详情请求失败: ${response.status}`);
                 }
-                
+
                 // 解析JSON
                 const data = await response.json();
                 
@@ -217,13 +217,13 @@ async function handleCustomApiSpecialDetail(id, customApi) {
         
         // 添加超时处理
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000);
-        
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
+
         // 添加鉴权参数到代理URL
-        const proxiedUrl = await window.ProxyAuth?.addAuthToProxyUrl ? 
+        const proxiedUrl = await window.ProxyAuth?.addAuthToProxyUrl ?
             await window.ProxyAuth.addAuthToProxyUrl(PROXY_URL + encodeURIComponent(detailUrl)) :
             PROXY_URL + encodeURIComponent(detailUrl);
-            
+
         // 获取详情页HTML
         const response = await fetch(proxiedUrl, {
             headers: {
@@ -231,9 +231,9 @@ async function handleCustomApiSpecialDetail(id, customApi) {
             },
             signal: controller.signal
         });
-        
+
         clearTimeout(timeoutId);
-        
+
         if (!response.ok) {
             throw new Error(`自定义API详情页请求失败: ${response.status}`);
         }
@@ -284,13 +284,13 @@ async function handleSpecialSourceDetail(id, sourceCode) {
         
         // 添加超时处理
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000);
-        
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
+
         // 添加鉴权参数到代理URL
-        const proxiedUrl = await window.ProxyAuth?.addAuthToProxyUrl ? 
+        const proxiedUrl = await window.ProxyAuth?.addAuthToProxyUrl ?
             await window.ProxyAuth.addAuthToProxyUrl(PROXY_URL + encodeURIComponent(detailUrl)) :
             PROXY_URL + encodeURIComponent(detailUrl);
-            
+
         // 获取详情页HTML
         const response = await fetch(proxiedUrl, {
             headers: {
@@ -298,9 +298,9 @@ async function handleSpecialSourceDetail(id, sourceCode) {
             },
             signal: controller.signal
         });
-        
+
         clearTimeout(timeoutId);
-        
+
         if (!response.ok) {
             throw new Error(`详情页请求失败: ${response.status}`);
         }

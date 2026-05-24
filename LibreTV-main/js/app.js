@@ -646,21 +646,23 @@ async function search() {
         // 保存搜索历史
         saveSearchHistory(query);
 
-        // 从所有选中的API源搜索
+        // 从所有选中的API源搜索，分批并发控制
         let allResults = [];
-        const searchPromises = selectedAPIs.map(apiId => 
-            searchByAPIAndKeyWord(apiId, query)
-        );
+        const maxConcurrent = AGGREGATED_SEARCH_CONFIG.maxConcurrent || 5;
+        const apiList = [...selectedAPIs];
 
-        // 等待所有搜索请求完成
-        const resultsArray = await Promise.all(searchPromises);
-
-        // 合并所有结果
-        resultsArray.forEach(results => {
-            if (Array.isArray(results) && results.length > 0) {
-                allResults = allResults.concat(results);
-            }
-        });
+        for (let i = 0; i < apiList.length; i += maxConcurrent) {
+            const batch = apiList.slice(i, i + maxConcurrent);
+            const batchPromises = batch.map(apiId =>
+                searchByAPIAndKeyWord(apiId, query)
+            );
+            const batchResults = await Promise.all(batchPromises);
+            batchResults.forEach(results => {
+                if (Array.isArray(results) && results.length > 0) {
+                    allResults = allResults.concat(results);
+                }
+            });
+        }
 
         // 对搜索结果进行排序：按名称优先，名称相同时按接口源排序
         allResults.sort((a, b) => {

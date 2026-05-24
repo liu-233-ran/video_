@@ -14,7 +14,8 @@ export async function onRequest(context) {
 
     const DEBUG_ENABLED = (env.DEBUG === 'true');
     const CACHE_TTL = parseInt(env.CACHE_TTL || '86400');
-    const MAX_RECURSION = parseInt(env.MAX_RECURSION || '5');
+    // Cloudflare Pages Functions 免费版限制 10 秒，fetch 超时设为 8 秒留余量
+    const FETCH_TIMEOUT = parseInt(env.FETCH_TIMEOUT || '8000');
 
     let USER_AGENTS = [
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -115,8 +116,24 @@ export async function onRequest(context) {
         return `/proxy/${encodeURIComponent(targetUrl)}`;
     }
 
+    // 带超时的 fetch
+    async function fetchWithTimeout(targetUrl, headers, timeoutMs) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+        try {
+            const response = await fetch(targetUrl, {
+                headers,
+                redirect: 'follow',
+                signal: controller.signal
+            });
+            return response;
+        } finally {
+            clearTimeout(timeoutId);
+        }
+    }
+
     async function fetchContentWithType(targetUrl) {
-        // Douban 图片需要 movie.douban.com Referer，否则返回 418
         let referer = request.headers.get('Referer') || new URL(targetUrl).origin;
         if (targetUrl.includes('doubanio.com')) {
             referer = 'https://movie.douban.com/';
@@ -130,8 +147,8 @@ export async function onRequest(context) {
         });
 
         try {
-            logDebug(`开始请求: ${targetUrl}`);
-            const response = await fetch(targetUrl, { headers, redirect: 'follow' });
+            logDebug(`开始请求: ${targetUrl} (超时: ${FETCH_TIMEOUT}ms)`);
+            const response = await fetchWithTimeout(targetUrl, headers, FETCH_TIMEOUT);
 
             if (!response.ok) {
                 const errorBody = await response.text().catch(() => '');
@@ -145,6 +162,10 @@ export async function onRequest(context) {
             return { content, contentType, responseHeaders: response.headers };
 
         } catch (error) {
+            if (error.name === 'AbortError') {
+                logDebug(`请求超时: ${targetUrl} (${FETCH_TIMEOUT}ms)`);
+                throw new Error(`请求超时 (${FETCH_TIMEOUT / 1000}秒): ${targetUrl}`);
+            }
             logDebug(`请求失败: ${targetUrl}: ${error.message}`);
             throw new Error(`请求目标URL失败 ${targetUrl}: ${error.message}`);
         }
@@ -206,80 +227,42 @@ export async function onRequest(context) {
         return output.join('\n');
     }
 
-     async function processM3u8Content(targetUrl, content, recursionDepth = 0) {
-         if (content.includes('#EXT-X-STREAM-INF') || content.includes('#EXT-X-MEDIA:')) {
-             return await processMasterPlaylist(targetUrl, content, recursionDepth);
-         }
-         return processMediaPlaylist(targetUrl, content);
-     }
-
-    async function processMasterPlaylist(url, content, recursionDepth) {
-        if (recursionDepth > MAX_RECURSION) {
-            throw new Error(`递归层数过多 (${MAX_RECURSION}): ${url}`);
-        }
-
+    // Master Playlist: 不递归抓取，只改写 URL 让客户端逐层请求
+    function processMasterPlaylistLight(url, content) {
         const baseUrl = getBaseUrl(url);
         const lines = content.split('\n');
-        let highestBandwidth = -1;
-        let bestVariantUrl = '';
+        const output = [];
 
         for (let i = 0; i < lines.length; i++) {
-            if (lines[i].startsWith('#EXT-X-STREAM-INF')) {
-                const bandwidthMatch = lines[i].match(/BANDWIDTH=(\d+)/);
-                const currentBandwidth = bandwidthMatch ? parseInt(bandwidthMatch[1], 10) : 0;
-
-                 let variantUriLine = '';
-                 for (let j = i + 1; j < lines.length; j++) {
-                     const line = lines[j].trim();
-                     if (line && !line.startsWith('#')) {
-                         variantUriLine = line;
-                         i = j;
-                         break;
-                     }
-                 }
-
-                 if (variantUriLine && currentBandwidth >= highestBandwidth) {
-                     highestBandwidth = currentBandwidth;
-                     bestVariantUrl = resolveUrl(baseUrl, variantUriLine);
-                 }
+            const line = lines[i].trim();
+            if (!line && i === lines.length - 1) {
+                output.push(line);
+                continue;
             }
-        }
-
-         if (!bestVariantUrl) {
-             for (let i = 0; i < lines.length; i++) {
-                 const line = lines[i].trim();
-                 if (line && !line.startsWith('#') && (line.endsWith('.m3u8') || line.includes('.m3u8?'))) {
-                    bestVariantUrl = resolveUrl(baseUrl, line);
-                     break;
-                 }
-             }
-         }
-
-        if (!bestVariantUrl) {
-            return processMediaPlaylist(url, content);
-        }
-
-        logDebug(`选择的子列表 (带宽: ${highestBandwidth}): ${bestVariantUrl}`);
-        const { content: variantContent, contentType: variantContentType } = await fetchContentWithType(bestVariantUrl);
-
-        if (!isM3u8Content(variantContent, variantContentType)) {
-             return processMediaPlaylist(bestVariantUrl, variantContent);
-        }
-
-        const processedVariant = await processM3u8Content(bestVariantUrl, variantContent, recursionDepth + 1);
-
-        // 尝试 KV 缓存
-        const cacheKey = `m3u8_processed:${bestVariantUrl}`;
-        try {
-            const kvNamespace = env.LIBRETV_PROXY_KV;
-            if (kvNamespace) {
-                waitUntil(kvNamespace.put(cacheKey, processedVariant, { expirationTtl: CACHE_TTL }));
+            if (!line) {
+                output.push('');
+                continue;
             }
-        } catch (e) {
-            // KV 不可用，跳过缓存
-        }
 
-        return processedVariant;
+            // 改写 KEY 标签中的 URI
+            if (line.startsWith('#EXT-X-KEY')) {
+                output.push(processKeyLine(line, baseUrl));
+                continue;
+            }
+            // 改写 MAP 标签中的 URI
+            if (line.startsWith('#EXT-X-MAP')) {
+                output.push(processMapLine(line, baseUrl));
+                continue;
+            }
+            // 非注释行 = 子列表 URL，改写为走代理
+            if (!line.startsWith('#')) {
+                const absoluteUrl = resolveUrl(baseUrl, line);
+                output.push(rewriteUrlToProxy(absoluteUrl));
+                continue;
+            }
+            output.push(line);
+        }
+        return output.join('\n');
     }
 
     // --- 主处理逻辑 ---
@@ -295,9 +278,18 @@ export async function onRequest(context) {
         const { content, contentType, responseHeaders } = await fetchContentWithType(targetUrl);
 
         if (isM3u8Content(content, contentType)) {
-            logDebug(`M3U8 内容，开始处理: ${targetUrl}`);
-            const processedM3u8 = await processM3u8Content(targetUrl, content, 0);
-            return createM3u8Response(processedM3u8);
+            const isMaster = content.includes('#EXT-X-STREAM-INF') || content.includes('#EXT-X-MEDIA:');
+            logDebug(`M3U8 内容 (${isMaster ? 'Master' : 'Media'} Playlist): ${targetUrl}`);
+
+            if (isMaster) {
+                // Master Playlist: 轻量处理，不递归抓取
+                const processed = processMasterPlaylistLight(targetUrl, content);
+                return createM3u8Response(processed);
+            } else {
+                // Media Playlist: 改写 .ts / .m3u8 等片段 URL
+                const processed = processMediaPlaylist(targetUrl, content);
+                return createM3u8Response(processed);
+            }
         } else {
             const finalHeaders = new Headers(responseHeaders);
             finalHeaders.set('Cache-Control', `public, max-age=${CACHE_TTL}`);
@@ -309,7 +301,15 @@ export async function onRequest(context) {
 
     } catch (error) {
         logDebug(`代理处理错误: ${error.message} \n ${error.stack}`);
-        return createResponse(`代理处理错误: ${error.message}`, 500);
+
+        // 区分超时和其他错误
+        const isTimeout = error.message.includes('超时') || error.name === 'AbortError';
+        const status = isTimeout ? 504 : 500;
+        const userMsg = isTimeout
+            ? `上游服务器响应超时，请稍后重试。目标: ${error.message.split(':').pop() || ''}`
+            : `代理处理错误: ${error.message}`;
+
+        return createResponse(userMsg, status);
     }
 }
 

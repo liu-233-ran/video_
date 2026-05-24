@@ -118,7 +118,8 @@ const AGGREGATED_SEARCH_CONFIG = {
     timeout: 8000,            // 单个源超时时间（毫秒）
     maxResults: 10000,          // 最大结果数量
     parallelRequests: true,   // 是否并行请求所有源
-    showSourceBadges: true    // 是否显示来源徽章
+    showSourceBadges: true,   // 是否显示来源徽章
+    maxConcurrent: 5          // 最大并发请求数（避免打满 Cloudflare 免费额度）
 };
 
 // 抽象API请求配置
@@ -127,7 +128,7 @@ const API_CONFIG = {
         // 只拼接参数部分，不再包含 /api.php/provide/vod/
         path: '?ac=videolist&wd=',
         pagePath: '?ac=videolist&wd={query}&pg={page}',
-        maxPages: 50, // 最大获取页数
+        maxPages: 3, // 最大获取页数 (Cloudflare Pages 免费版限制，不宜过大)
         headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
             'Accept': 'application/json'
